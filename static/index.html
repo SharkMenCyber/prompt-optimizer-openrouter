@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hermes Prompt Optimizer</title>
+    <link rel="stylesheet" href="/styles.css?v=0.9.3" />
+  </head>
+  <body>
+    <svg class="svg-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
+      <symbol id="i-chevrons" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" /></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" /></symbol>
+      <symbol id="i-dashboard" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" /></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" /><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" /><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" /></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z" /><circle cx="12" cy="12" r="3" /></symbol>
+      <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" /></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></symbol>
+      <symbol id="i-restart" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14" /><path d="M5 12h14" /></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></symbol>
+      <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" /></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M10 11v6" /><path d="M14 11v6" /></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14" /></symbol>
+    </svg>
+
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <button class="workspace" type="button">
+            <span class="workspace-badge"><svg class="icon"><use href="#i-moon" /></svg></span>
+            <span class="workspace-name">Hermes</span>
+            <svg class="icon workspace-caret"><use href="#i-chevrons" /></svg>
+          </button>
+
+          <button id="newPromptNav" class="btn-newchat" type="button">
+            <svg class="icon"><use href="#i-plus" /></svg>
+            <span>New prompt</span>
+            <kbd class="kbd">/</kbd>
+          </button>
+
+          <div class="conv-section">
+            <p class="conv-label">Chats</p>
+            <div id="conversationList" class="conv-list empty">Loading chats...</div>
+          </div>
+        </div>
+
+        <div class="sidebar-bottom">
+          <button id="openSettings" class="nav-item" type="button">
+            <svg class="icon"><use href="#i-settings" /></svg>
+            <span>Settings</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="content-header">
+          <div class="breadcrumb">
+            <svg class="icon"><use href="#i-message" /></svg>
+            <span id="sectionTitle">New prompt</span>
+          </div>
+          <div class="header-actions">
+            <span id="modelStatus" class="muted compact-hide">Models loading...</span>
+            <span id="healthBadge" class="status-pill">Checking...</span>
+            <button id="restartApp" class="btn btn-ghost icon-btn" type="button" title="Restart backend">
+              <svg class="icon"><use href="#i-restart" /></svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- ===================== CHAT VIEW ===================== -->
+        <section id="chatView" class="view active">
+          <div id="chatScroll" class="chat-scroll">
+            <div id="chatEmpty" class="chat-empty">
+              <span class="chat-empty-icon"><svg class="icon"><use href="#i-sparkles" /></svg></span>
+              <h1 class="page-title">What prompt can I optimize?</h1>
+              <p class="page-sub">Paste a rough prompt below. Hermes turns it into a strong, scored, production-ready prompt — then keep chatting to refine it further.</p>
+            </div>
+            <div id="chatThread" class="chat-thread"></div>
+          </div>
+
+          <div class="composer">
+            <div class="composer-card">
+              <details id="composerOptions" class="composer-options">
+                <summary>
+                  <span class="composer-summary" id="composerSummary">Auto model · 3 versions · Hermes on</span>
+                  <svg class="icon caret"><use href="#i-chevrons" /></svg>
+                </summary>
+                <div class="composer-controls">
+                  <label class="field">
+                    <span>Model</span>
+                    <select id="modelSelect"><option value="auto">Auto</option></select>
+                  </label>
+                  <label class="field">
+                    <span>Versions</span>
+                    <input id="versionCount" type="number" min="1" max="5" value="3" />
+                  </label>
+                  <label class="check">
+                    <input id="useHermes" type="checkbox" checked />
+                    <span>Use Hermes Agent System</span>
+                  </label>
+                  <label class="check">
+                    <input id="forceClarification" type="checkbox" />
+                    <span>Force clarification check</span>
+                  </label>
+                </div>
+              </details>
+
+              <div class="composer-input">
+                <textarea id="rawPrompt" rows="1" placeholder="Paste a rough prompt to optimize..." spellcheck="true"></textarea>
+                <button id="optimizeButton" class="btn btn-primary composer-send" type="button" title="Optimize (Enter)">
+                  <svg class="icon"><use href="#i-send" /></svg>
+                </button>
+              </div>
+            </div>
+            <div class="composer-foot">
+              <span id="runStatus" class="run-status">Ready.</span>
+              <button id="clearButton" class="linkish" type="button">Clear</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== SETTINGS VIEW ===================== -->
+        <section id="settingsView" class="view">
+          <div class="content-scroll">
+            <div class="settings-head">
+              <button id="backToChat" class="btn btn-ghost" type="button">
+                <svg class="icon"><use href="#i-back" /></svg>
+                Back to chat
+              </button>
+            </div>
+
+            <p class="eyebrow">Status</p>
+            <div class="settings-grid">
+              <article class="card info-card">
+                <h3>OpenRouter</h3>
+                <p id="openrouterInfo" class="muted">Checking...</p>
+              </article>
+              <article class="card info-card">
+                <h3>Hermes Agent</h3>
+                <p id="hermesInfo" class="muted">Checking...</p>
+              </article>
+              <article class="card info-card">
+                <h3>Memory</h3>
+                <p id="memoryInfo" class="muted">Checking...</p>
+              </article>
+              <article class="card info-card">
+                <h3>Feedback</h3>
+                <p id="feedbackInfo" class="muted">Checking...</p>
+              </article>
+            </div>
+
+            <div class="settings-section-head">
+              <div>
+                <p class="eyebrow">Run details</p>
+                <h2 id="inspectLabel">No run selected</h2>
+              </div>
+              <span id="inspectScore" class="status-pill">--</span>
+            </div>
+
+            <div class="detail-tabs">
+              <button class="detail-tab active" type="button" data-detail="versions">Versions</button>
+              <button class="detail-tab" type="button" data-detail="trace">Trace</button>
+              <button class="detail-tab" type="button" data-detail="history">History</button>
+            </div>
+
+            <div id="detail-versions" class="detail-panel active">
+              <div id="versionsList" class="stack-list empty">Select a run from History to see its versions.</div>
+            </div>
+            <div id="detail-trace" class="detail-panel">
+              <div id="traceList" class="stack-list empty">Select a run from History to see its agent trace.</div>
+            </div>
+            <div id="detail-history" class="detail-panel">
+              <div class="card-head section-head">
+                <div>
+                  <p class="eyebrow">Saved runs</p>
+                  <h2>History</h2>
+                </div>
+                <button id="refreshHistory" class="btn btn-ghost" type="button">
+                  <svg class="icon"><use href="#i-refresh" /></svg>
+                  Refresh
+                </button>
+              </div>
+              <div id="historyList" class="stack-list empty">No prompt history yet.</div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="setupOverlay" class="setup-overlay is-hidden">
+      <div class="setup-card">
+        <span class="setup-icon"><svg class="icon"><use href="#i-sparkles" /></svg></span>
+        <h1 class="setup-title">Welcome to Prompt Optimizer</h1>
+        <p class="setup-sub">Enter your OpenRouter API key to get started. It is stored locally on this machine and used only to reach OpenRouter.</p>
+        <input id="setupKeyInput" type="password" class="setup-input" placeholder="OpenRouter API key" autocomplete="off" spellcheck="false" />
+        <button id="setupSaveBtn" class="btn btn-primary setup-save" type="button">
+          <svg class="icon"><use href="#i-sparkles" /></svg>
+          <span>Save &amp; continue</span>
+        </button>
+        <p id="setupError" class="setup-error"></p>
+        <p class="setup-hint">No key yet? Create one in your OpenRouter account settings.</p>
+      </div>
+    </div>
+
+    <div id="confirmOverlay" class="setup-overlay is-hidden">
+      <div class="setup-card confirm-card">
+        <span class="setup-icon danger"><svg class="icon"><use href="#i-trash" /></svg></span>
+        <h1 class="setup-title">Delete this chat?</h1>
+        <p id="confirmText" class="setup-sub">This permanently removes the chat and its optimized prompts. This can't be undone.</p>
+        <div class="confirm-actions">
+          <button id="confirmCancel" class="btn btn-ghost" type="button">Cancel</button>
+          <button id="confirmDelete" class="btn btn-danger" type="button">
+            <svg class="icon"><use href="#i-trash" /></svg>
+            <span>Delete chat</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app.js?v=0.9.3"></script>
+  </body>
+</html>
