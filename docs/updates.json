@@ -1,0 +1,22 @@
+[
+  {
+    "date": "2026-05-23",
+    "title": "Design prompt routing fix",
+    "details": "CSS designer, dashboard screenshot, and HTML/CSS prompt requests now route to the focused design/persona prompt builder instead of the software blueprint builder."
+  },
+  {
+    "date": "2026-05-23",
+    "title": "Lean optimizer reset",
+    "details": "Removed the platform features that were getting in the way and returned the app to a focused Hermes-powered prompt optimizer."
+  },
+  {
+    "date": "2026-05-23",
+    "title": "Prompt scaffolding cleanup",
+    "details": "Removed internal model-specific, memory/reuse, and original-idea helper notes from final optimized prompts while keeping those signals internal to the builder."
+  },
+  {
+    "date": "2026-05-23",
+    "title": "Prompt relevance routing",
+    "details": "Added focused prompt-building modes so design/persona prompts and software/system prompts stay aligned with the raw user request."
+  }
+]
