@@ -14,10 +14,6 @@ A local prompt optimizer that uses OpenRouter and the Hermes Agent System to tur
 - Saves basic history
 - Reuses successful prior prompt patterns through memory retrieval
 
-## What Was Removed
-
-This project was simplified back to the core prompt optimizer. It no longer includes auth, workspaces, admin panels, email, PostgreSQL, Docker deployment, analytics, eval lab, Promptfoo, external tools, import/export, templates, observability, security simulation UI, the fancy agent map, or AI judge controls.
-
 ## Setup
 
 1. Create or edit `.env`:
