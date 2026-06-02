@@ -12,4 +12,7 @@ dist/
 installer/*.exe
 NUL
 .claude/settings.local.json
+# Embedded WebView2/Chromium runtime cache created when running the app in dev
+# mode. Hundreds of machine-specific cache files — never belongs in the repo.
+webview/
 

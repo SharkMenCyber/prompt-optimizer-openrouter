@@ -1,5 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const USER_ID = "local-user";
+const LOCKED_MODEL_ID = "deepseek/deepseek-v4-pro";
+const LOCKED_MODEL_LABEL = "DeepSeek V4 Pro";
 
 const state = {
   activeConversationId: null,
@@ -17,6 +19,10 @@ const state = {
   // started it and the prompt text, so we can re-show a pending bubble if the
   // user navigates back to it.
   activeRun: null,
+  // Multi-select for bulk chat deletion: when on, sidebar rows show a checkbox
+  // and clicking a row toggles its selection instead of opening it.
+  selectMode: false,
+  selectedIds: new Set(),
 };
 
 let viewCounter = 0;
@@ -43,6 +49,74 @@ function setStatus(message) {
   $("runStatus").textContent = message;
 }
 
+function ensureAgentLoadingOverlay() {
+  let overlay = $("agentLoadingOverlay");
+  if (overlay) return overlay;
+
+  // Safety net for already-open desktop windows whose HTML was loaded before
+  // the overlay markup existed. On the next JS reload this creates the missing
+  // DOM instead of silently falling back to only the small status text.
+  overlay = document.createElement("div");
+  overlay.id = "agentLoadingOverlay";
+  overlay.className = "agent-loading-overlay is-hidden";
+  overlay.setAttribute("role", "status");
+  overlay.setAttribute("aria-live", "polite");
+  overlay.setAttribute("aria-atomic", "true");
+  overlay.innerHTML = `
+    <div class="agent-loading-card">
+      <div class="agent-loading-orb" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <p class="eyebrow">Agent running</p>
+      <h1 id="agentLoadingText" class="agent-loading-title">Agent optimizing this prompt</h1>
+      <p id="agentLoadingSubtext" class="agent-loading-sub">Hermes and the prompt agents are working. Results will appear here automatically.</p>
+    </div>`;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function updateAgentWorkIndicator() {
+  const indicator = $("agentWorkIndicator");
+  const text = $("agentWorkText");
+  const overlay = ensureAgentLoadingOverlay();
+  const overlayText = $("agentLoadingText");
+  const overlaySubtext = $("agentLoadingSubtext");
+  const run = state.activeRun;
+  const isWorking = Boolean(state.busy && run);
+
+  if (indicator) indicator.classList.toggle("is-hidden", !isWorking);
+  // Never show the full-screen loading overlay. It used to cover the entire
+  // window (sidebar included), so the user could not open another chat while a
+  // prompt optimized, and it hid the live in-chat agent checklist drawn beneath
+  // it. The small top-right badge + the sidebar spinner + the in-chat stepper
+  // already signal "an agent is running" without trapping the user on one screen.
+  if (overlay) overlay.classList.add("is-hidden");
+
+  if (!isWorking) {
+    if (indicator) indicator.setAttribute("aria-label", "No background agent is running");
+    if (overlay) overlay.setAttribute("aria-label", "No background agent is running");
+    return;
+  }
+
+  const currentChatVisible = $("chatView").classList.contains("active") && run.viewToken === state.activeViewToken;
+  const message = currentChatVisible
+    ? run.isFollowUp
+      ? "Agent refining this prompt"
+      : "Agent optimizing this prompt"
+    : "Agent working in background";
+  const details = run.isFollowUp
+    ? "Hermes is refining your existing prompt. Results will appear here automatically."
+    : "Hermes and the prompt agents are optimizing your prompt. Results will appear here automatically.";
+
+  if (text) text.textContent = message;
+  if (overlayText) overlayText.textContent = message;
+  if (overlaySubtext) overlaySubtext.textContent = details;
+  if (indicator) indicator.setAttribute("aria-label", message);
+  if (overlay) overlay.setAttribute("aria-label", `${message}. ${details}`);
+}
+
 // Busy reflects whether an optimization is running. It is decoupled from the
 // status text so that navigating between chats (which changes the status line)
 // never re-enables the send button while a run is still in flight.
@@ -50,6 +124,7 @@ function setBusy(busy) {
   state.busy = busy;
   $("runStatus").classList.toggle("busy", busy);
   $("optimizeButton").disabled = busy;
+  updateAgentWorkIndicator();
 }
 
 async function fetchJson(url, options = {}) {
@@ -78,6 +153,7 @@ function showChat() {
   // Restore the breadcrumb title for the current chat context.
   const active = state.conversations.find((c) => c.id === state.activeConversationId);
   $("sectionTitle").textContent = active ? active.title : "New prompt";
+  updateAgentWorkIndicator();
 }
 
 function showSettings() {
@@ -85,6 +161,7 @@ function showSettings() {
   $("chatView").classList.remove("active");
   $("openSettings").classList.add("active");
   $("sectionTitle").textContent = "Settings";
+  updateAgentWorkIndicator();
 }
 
 /* ======================= Health / status ======================= */
@@ -95,7 +172,7 @@ async function loadHealth() {
     $("healthBadge").textContent = data.openrouter_configured ? `Ready v${data.app_version}` : `No OpenRouter key v${data.app_version}`;
     $("healthBadge").classList.toggle("warn", !data.openrouter_configured);
     $("openrouterInfo").textContent = data.openrouter_configured
-      ? `Configured. Default: ${data.default_model || "auto"}. Selected: ${data.selected_model || "auto"}.`
+      ? `Configured. Model locked to ${data.selected_model || LOCKED_MODEL_ID}.`
       : "Not configured. Add OPENROUTER_API_KEY to .env.";
   } catch (error) {
     $("healthBadge").textContent = "Offline";
@@ -108,18 +185,17 @@ async function loadModels() {
   try {
     const data = await fetchJson("/api/models");
     state.models = data.models || [];
-    const current = $("modelSelect").value || "auto";
-    $("modelSelect").innerHTML = `<option value="auto">Auto</option>`;
-    state.models.forEach((model) => {
-      if (!model.id) return;
-      const option = document.createElement("option");
-      option.value = model.id;
-      option.textContent = model.name ? `${model.name} (${model.id})` : model.id;
-      $("modelSelect").appendChild(option);
-    });
-    $("modelSelect").value = [...$("modelSelect").options].some((option) => option.value === current) ? current : "auto";
+    const model = state.models.find((item) => item.id === LOCKED_MODEL_ID);
+    const label = model?.name ? `${model.name} (${LOCKED_MODEL_ID})` : `${LOCKED_MODEL_LABEL} (${LOCKED_MODEL_ID})`;
+    $("modelSelect").innerHTML = "";
+    const option = document.createElement("option");
+    option.value = LOCKED_MODEL_ID;
+    option.textContent = label;
+    $("modelSelect").appendChild(option);
+    $("modelSelect").value = LOCKED_MODEL_ID;
+    $("modelSelect").disabled = true;
     $("modelStatus").textContent = data.configured
-      ? `${state.models.length} OpenRouter models available`
+      ? `Model locked: ${LOCKED_MODEL_LABEL}`
       : "OpenRouter API key not configured";
     updateComposerSummary();
   } catch (error) {
@@ -164,7 +240,15 @@ async function loadConversations() {
   try {
     const rows = await fetchJson(`/api/conversations?user_id=${USER_ID}&limit=80`);
     state.conversations = rows;
+    // Drop selections for chats that no longer exist (deleted elsewhere/refresh).
+    if (state.selectedIds.size) {
+      const live = new Set(rows.map((r) => r.id));
+      state.selectedIds.forEach((id) => {
+        if (!live.has(id)) state.selectedIds.delete(id);
+      });
+    }
     renderConversationList(rows);
+    updateBulkBar();
   } catch (error) {
     $("conversationList").className = "conv-list empty";
     $("conversationList").textContent = `Could not load chats: ${error.message}`;
@@ -186,13 +270,29 @@ function renderConversationList(rows) {
     container.textContent = "No chats yet. Start one below.";
     return;
   }
-  container.className = "conv-list";
+  container.className = state.selectMode ? "conv-list select-mode" : "conv-list";
   container.innerHTML = all
     .map((row) => {
       const id = escapeHtml(row.id);
       const title = escapeHtml(row.title || "Untitled");
       const isActive = row.id === state.activeConversationId || row.id === state.activeViewToken;
       const isLoading = Boolean(row.__pending) || Boolean(run && run.conversationId && row.id === run.conversationId);
+      // In select mode, saved (non-pending, non-loading) rows become checkbox
+      // rows. Loading/pending rows stay as normal rows — you can't delete a chat
+      // that's still optimizing.
+      const selectable = !row.__pending && !isLoading;
+      if (state.selectMode && selectable) {
+        const checked = state.selectedIds.has(row.id);
+        return `
+          <div class="conv-item ${checked ? "selected" : ""}" data-conv-id="${id}">
+            <label class="conv-item-select" title="${title}">
+              <input type="checkbox" class="conv-check" data-check-id="${id}" ${checked ? "checked" : ""} />
+              <span class="conv-item-title">${title}</span>
+              <span class="conv-item-count">${row.turn_count || 0}</span>
+            </label>
+          </div>
+        `;
+      }
       const leftIcon = isLoading
         ? `<span class="conv-spinner" aria-hidden="true"></span>`
         : `<svg class="icon"><use href="#i-message" /></svg>`;
@@ -232,6 +332,50 @@ function renderConversationList(rows) {
       askDeleteConversation(btn.dataset.delId, btn.dataset.delTitle);
     });
   });
+  container.querySelectorAll(".conv-check").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const id = cb.dataset.checkId;
+      if (cb.checked) state.selectedIds.add(id);
+      else state.selectedIds.delete(id);
+      cb.closest(".conv-item")?.classList.toggle("selected", cb.checked);
+      updateBulkBar();
+    });
+  });
+}
+
+// Enter/leave multi-select mode. Leaving clears the current selection.
+function toggleSelectMode(force) {
+  state.selectMode = typeof force === "boolean" ? force : !state.selectMode;
+  if (!state.selectMode) state.selectedIds.clear();
+  $("convBulkBar").classList.toggle("is-hidden", !state.selectMode);
+  const toggle = $("convSelectToggle");
+  toggle.textContent = state.selectMode ? "Done" : "Select";
+  toggle.classList.toggle("active", state.selectMode);
+  renderConversationList(state.conversations);
+  updateBulkBar();
+}
+
+// Select or clear every saved chat at once.
+function selectAllConversations(checked) {
+  state.selectedIds.clear();
+  if (checked) state.conversations.forEach((c) => state.selectedIds.add(c.id));
+  renderConversationList(state.conversations);
+  updateBulkBar();
+}
+
+// Keep the bulk bar (count, delete button, select-all tri-state) in sync.
+function updateBulkBar() {
+  const count = state.selectedIds.size;
+  const countEl = $("convSelectedCount");
+  if (countEl) countEl.textContent = `${count} selected`;
+  const delBtn = $("convDeleteSelected");
+  if (delBtn) delBtn.disabled = count === 0;
+  const selectAll = $("convSelectAll");
+  if (selectAll) {
+    const total = state.conversations.length;
+    selectAll.checked = total > 0 && count >= total;
+    selectAll.indeterminate = count > 0 && count < total;
+  }
 }
 
 // Toggle the sidebar's active highlight to match the current view (a real
@@ -315,6 +459,7 @@ function refreshRunStatus() {
   } else {
     setStatus("Ready.");
   }
+  updateAgentWorkIndicator();
 }
 
 /* ======================= Chat thread render ======================= */
@@ -520,7 +665,7 @@ async function optimizePrompt() {
   const payload = {
     raw_prompt: rawPrompt,
     user_id: USER_ID,
-    target_model: $("modelSelect").value || "auto",
+    target_model: LOCKED_MODEL_ID,
     versions: Number($("versionCount").value || 3),
     force_clarification: $("forceClarification").checked,
     use_hermes: $("useHermes").checked,
@@ -767,11 +912,9 @@ async function loadHistory() {
 
 /* ======================= Composer helpers ======================= */
 function updateComposerSummary() {
-  const model = $("modelSelect").value || "auto";
-  const modelLabel = model === "auto" ? "Auto model" : model;
   const versions = $("versionCount").value || 3;
   const hermes = $("useHermes").checked ? "Hermes on" : "Hermes off";
-  $("composerSummary").textContent = `${modelLabel} · ${versions} versions · ${hermes}`;
+  $("composerSummary").textContent = `${LOCKED_MODEL_LABEL} - ${versions} versions - ${hermes}`;
 }
 
 function autoGrow() {
@@ -812,41 +955,68 @@ async function restartApp() {
 }
 
 /* ======================= Delete chat ======================= */
-let pendingDeleteId = null;
+let pendingDeleteIds = [];
 
 function askDeleteConversation(conversationId, title) {
   if (!conversationId) return;
-  pendingDeleteId = conversationId;
+  pendingDeleteIds = [conversationId];
   const name = (title || "").trim();
+  $("confirmTitle").textContent = "Delete this chat?";
   $("confirmText").textContent = name
     ? `"${name}" and its optimized prompts will be permanently deleted. This can't be undone.`
     : "This chat and its optimized prompts will be permanently deleted. This can't be undone.";
+  $("confirmDeleteLabel").textContent = "Delete chat";
+  $("confirmOverlay").classList.remove("is-hidden");
+  $("confirmDelete").focus();
+}
+
+// Confirm deletion of every currently ticked chat.
+function askDeleteSelected() {
+  const ids = [...state.selectedIds];
+  if (!ids.length) return;
+  pendingDeleteIds = ids;
+  const n = ids.length;
+  $("confirmTitle").textContent = n === 1 ? "Delete this chat?" : `Delete ${n} chats?`;
+  $("confirmText").textContent =
+    `${n} chat${n === 1 ? "" : "s"} and all their optimized prompts will be permanently deleted. This can't be undone.`;
+  $("confirmDeleteLabel").textContent = n === 1 ? "Delete chat" : `Delete ${n}`;
   $("confirmOverlay").classList.remove("is-hidden");
   $("confirmDelete").focus();
 }
 
 function hideConfirm() {
-  pendingDeleteId = null;
+  pendingDeleteIds = [];
   $("confirmOverlay").classList.add("is-hidden");
 }
 
 async function confirmDeleteNow() {
-  const conversationId = pendingDeleteId;
+  const ids = pendingDeleteIds.slice();
   hideConfirm();
-  if (!conversationId) return;
+  if (!ids.length) return;
   try {
-    await fetchJson(`/api/conversations/${encodeURIComponent(conversationId)}?user_id=${USER_ID}`, {
-      method: "DELETE",
-    });
-    // If the chat we just deleted is the one on screen, drop back to a fresh
+    const results = await Promise.allSettled(
+      ids.map((id) =>
+        fetchJson(`/api/conversations/${encodeURIComponent(id)}?user_id=${USER_ID}`, { method: "DELETE" })
+      )
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    // If a chat we just deleted is the one on screen, drop back to a fresh
     // composer so we're not showing a thread that no longer exists.
-    if (state.activeConversationId === conversationId || state.activeViewToken === conversationId) {
+    if (ids.includes(state.activeConversationId) || ids.includes(state.activeViewToken)) {
       newConversation();
     }
+    // Leave select mode (also clears the selection) after a bulk delete.
+    if (state.selectMode) toggleSelectMode(false);
+    else state.selectedIds.clear();
     await Promise.all([loadConversations(), loadHistory(), loadMemoryInsights()]);
-    setStatus("Chat deleted.");
+    const deleted = ids.length - failed;
+    if (failed) {
+      setStatus(`Deleted ${deleted} chat${deleted === 1 ? "" : "s"}; ${failed} could not be deleted.`);
+    } else {
+      setStatus(deleted === 1 ? "Chat deleted." : `${deleted} chats deleted.`);
+    }
   } catch (error) {
-    setStatus(`Could not delete chat: ${error.message}`);
+    setStatus(`Could not delete: ${error.message}`);
   }
 }
 
@@ -914,6 +1084,9 @@ function bindEvents() {
 
   $("confirmCancel").addEventListener("click", hideConfirm);
   $("confirmDelete").addEventListener("click", confirmDeleteNow);
+  $("convSelectToggle").addEventListener("click", () => toggleSelectMode());
+  $("convDeleteSelected").addEventListener("click", askDeleteSelected);
+  $("convSelectAll").addEventListener("change", (event) => selectAllConversations(event.target.checked));
   $("confirmOverlay").addEventListener("click", (event) => {
     if (event.target === $("confirmOverlay")) hideConfirm();
   });
@@ -939,6 +1112,11 @@ function bindEvents() {
     if (event.key === "Escape" && confirmOpen) {
       event.preventDefault();
       hideConfirm();
+      return;
+    }
+    if (event.key === "Escape" && state.selectMode) {
+      event.preventDefault();
+      toggleSelectMode(false);
       return;
     }
     if (event.key === "/" && !confirmOpen && !isTypingTarget(event.target)) {

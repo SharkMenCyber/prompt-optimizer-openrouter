@@ -55,7 +55,7 @@ def get_settings() -> Settings:
     return Settings(
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
         openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip(),
-        openrouter_model=os.getenv("OPENROUTER_MODEL", "auto").strip(),
+        openrouter_model=os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-pro").strip(),
         app_referer=os.getenv("OPENROUTER_APP_REFERER", APP_REFERER).strip(),
         app_title=os.getenv("OPENROUTER_APP_TITLE", APP_TITLE).strip(),
         database_path=(DATA_DIR / database_path).resolve(),

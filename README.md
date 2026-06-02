@@ -25,7 +25,7 @@ This project was simplified back to the core prompt optimizer. It no longer incl
 ```env
 OPENROUTER_API_KEY=your_key_here
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_MODEL=auto
+OPENROUTER_MODEL=deepseek/deepseek-v4-pro
 DATABASE_PATH=data/prompt_optimizer.db
 PROMPT_OPTIMIZER_POLICY_MODE=strict
 PROMPT_OPTIMIZER_ENABLE_LOCAL_RESTART=true

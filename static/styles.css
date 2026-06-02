@@ -315,6 +315,145 @@ textarea {
   background: rgba(180, 120, 40, 0.08);
 }
 
+.agent-work-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  max-width: 260px;
+  padding: 5px 12px;
+  border: 1px solid rgba(237, 237, 237, 0.18);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 0 24px rgba(255, 255, 255, 0.04);
+}
+
+.agent-work-spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--text);
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.42);
+  animation: agentPulse 1100ms ease-out infinite;
+}
+
+@keyframes agentPulse {
+  0% {
+    transform: scale(0.82);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.42);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.82);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+    opacity: 0.8;
+  }
+}
+
+.agent-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.12), transparent 28%),
+    rgba(7, 7, 7, 0.86);
+  backdrop-filter: blur(6px);
+}
+
+.agent-loading-card {
+  width: min(520px, 92vw);
+  border: 1px solid rgba(237, 237, 237, 0.18);
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(30, 30, 30, 0.96), rgba(12, 12, 12, 0.98));
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.52);
+  padding: 34px 32px;
+  text-align: center;
+}
+
+.agent-loading-orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 22px;
+}
+
+.agent-loading-orb::before {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--text);
+  animation: spin 900ms linear infinite;
+}
+
+.agent-loading-orb span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 999px;
+  background: var(--text);
+  opacity: 0.8;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.42);
+  animation: agentDotFade 1100ms ease-in-out infinite;
+}
+
+.agent-loading-orb span:nth-child(1) {
+  transform: translateY(-30px);
+}
+
+.agent-loading-orb span:nth-child(2) {
+  transform: rotate(120deg) translateY(-30px);
+  animation-delay: 160ms;
+}
+
+.agent-loading-orb span:nth-child(3) {
+  transform: rotate(240deg) translateY(-30px);
+  animation-delay: 320ms;
+}
+
+@keyframes agentDotFade {
+  0%, 100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.agent-loading-title {
+  margin: 6px 0 10px;
+  font-size: clamp(24px, 4vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.agent-loading-sub {
+  max-width: 420px;
+  margin: 0 auto;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 /* ---------- Content scroll area ---------- */
 .content-scroll {
   flex: 1;
@@ -921,7 +1060,9 @@ select:focus-visible {
   background: transparent;
   color: var(--dim);
   cursor: pointer;
-  opacity: 0;
+  /* Visible by default (was opacity:0 hover-only, which hid it entirely on the
+     desktop webview). Subtle until the row is hovered/focused. */
+  opacity: 0.5;
   transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 
@@ -981,6 +1122,122 @@ select:focus-visible {
 }
 
 .conv-item.loading .conv-item-title {
+  color: var(--text);
+}
+
+/* ---- Chat selection / bulk delete ---- */
+.conv-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conv-select-toggle {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 6px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.conv-select-toggle:hover {
+  background: var(--card);
+  color: var(--text);
+}
+
+.conv-select-toggle.active {
+  background: var(--elevated);
+  color: var(--text);
+}
+
+.conv-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--card);
+}
+
+.conv-bulk-bar.is-hidden {
+  display: none;
+}
+
+.conv-bulk-all {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.conv-selected-count {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.conv-bulk-delete {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.12s ease, filter 0.12s ease;
+}
+
+.conv-bulk-delete .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.conv-bulk-delete:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.conv-bulk-delete:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.conv-item-select {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.conv-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--danger);
+}
+
+.conv-list.select-mode .conv-item.selected {
+  background: var(--card);
+  border-color: var(--border);
   color: var(--text);
 }
 

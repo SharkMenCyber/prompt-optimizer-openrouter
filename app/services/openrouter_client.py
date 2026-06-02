@@ -1,3 +1,4 @@
+import math
 import time
 from typing import Any
 
@@ -9,9 +10,27 @@ from app.security import safe_error_message
 from app.utils.json_tools import extract_json_object
 
 
-# Sensible default when "auto" selection can't reach the catalog: capable,
-# inexpensive, widely available on OpenRouter, supports tools + JSON output.
-FALLBACK_TEXT_MODEL = "openai/gpt-4o-mini"
+# The optimizer is intentionally locked to one concrete OpenRouter model so
+# every agent in the pipeline uses the same context window, pricing envelope,
+# and instruction-following profile.
+LOCKED_TEXT_MODEL = "deepseek/deepseek-v4-pro"
+FALLBACK_TEXT_MODEL = LOCKED_TEXT_MODEL
+
+# Per-request HTTP timeout (seconds). The locked model is a reasoning model, so
+# even its slowest legitimate call (the 8500-token builder) finishes well inside
+# this window. The timeout exists to fail fast on a genuinely stuck request
+# instead of letting the SDK default (~10 minutes) stall the whole pipeline.
+REQUEST_TIMEOUT_SECONDS = 180.0
+
+# OpenRouter catalog entries that are routers/meta-models, not concrete models.
+# They can advertise placeholder pricing (for example -1) and very large
+# context/capability metadata. Keep them out of automatic ranking so "auto"
+# resolves to a real text model the app can report and reason about clearly.
+ROUTER_META_MODEL_IDS = {
+    "openrouter/auto",
+    "openrouter/pareto-code",
+    "openrouter/bodybuilder",
+}
 
 
 class OpenRouterClient:
@@ -23,6 +42,7 @@ class OpenRouterClient:
             self._client = OpenAI(
                 api_key=self.settings.openrouter_api_key,
                 base_url=self.settings.openrouter_base_url,
+                timeout=REQUEST_TIMEOUT_SECONDS,
                 default_headers={
                     "HTTP-Referer": self.settings.app_referer,
                     "X-Title": self.settings.app_title,
@@ -39,12 +59,23 @@ class OpenRouterClient:
         model: str | None = None,
         temperature: float = 0.2,
         max_tokens: int = 1400,
+        reasoning_enabled: bool = True,
     ) -> str:
         if self._client is None:
             raise RuntimeError("OpenRouter API key is not configured.")
 
         selected_model = self.select_model(model)
         last_error: Exception | None = None
+
+        # The locked model is a reasoning model: its hidden reasoning phase adds
+        # ~15-40s and 500-2000 tokens to every call, and those tokens count
+        # against max_tokens (so reasoning overflow truncates the answer and
+        # forces a fallback). Pure extraction/analysis agents pass
+        # reasoning_enabled=False to skip it — ~3x faster and no truncation —
+        # while depth-critical agents (deep interpreter, builder) keep it on.
+        extra_args: dict[str, Any] = {}
+        if not reasoning_enabled:
+            extra_args["extra_body"] = {"reasoning": {"enabled": False}}
 
         for attempt in range(3):
             try:
@@ -53,6 +84,7 @@ class OpenRouterClient:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    **extra_args,
                 )
                 return response.choices[0].message.content or ""
             except RateLimitError as exc:
@@ -90,25 +122,12 @@ class OpenRouterClient:
         return [item for item in data if _produces_text(item)]
 
     def select_model(self, requested_model: str | None = None) -> str:
-        selected = (requested_model or self.settings.openrouter_model or "auto").strip()
-        if selected and selected.lower() != "auto":
-            return selected
+        """Return the single model this app is allowed to use.
 
-        if self._selected_auto_model:
-            return self._selected_auto_model
-
-        try:
-            models = self.list_models()
-        except Exception:
-            self._selected_auto_model = FALLBACK_TEXT_MODEL
-            return self._selected_auto_model
-
-        if not models:
-            self._selected_auto_model = FALLBACK_TEXT_MODEL
-            return self._selected_auto_model
-
-        self._selected_auto_model = max(models, key=self._prompt_optimizer_model_score).get("id", FALLBACK_TEXT_MODEL)
-        return self._selected_auto_model
+        `requested_model` is accepted for backward-compatible API/UI payloads,
+        but ignored so direct API calls cannot silently switch providers.
+        """
+        return LOCKED_TEXT_MODEL
 
     def _prompt_optimizer_model_score(self, model: dict[str, Any]) -> float:
         model_id = str(model.get("id") or "").lower()
@@ -118,7 +137,7 @@ class OpenRouterClient:
         prompt_cost = _to_float(pricing.get("prompt"))
         completion_cost = _to_float(pricing.get("completion"))
 
-        if not _produces_text(model):
+        if not _is_auto_selectable_model(model):
             return -1000
 
         score = 0.0
@@ -149,6 +168,7 @@ class OpenRouterClient:
         model: str | None = None,
         temperature: float = 0.1,
         max_tokens: int = 1800,
+        reasoning_enabled: bool = True,
     ) -> dict[str, Any]:
         if not self.configured:
             return fallback
@@ -165,6 +185,7 @@ class OpenRouterClient:
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                reasoning_enabled=reasoning_enabled,
             )
             parsed = extract_json_object(content)
             if parsed is None:
@@ -193,8 +214,32 @@ def _produces_text(model: dict[str, Any]) -> bool:
     return True
 
 
+def _is_router_meta_model(model: dict[str, Any]) -> bool:
+    return str(model.get("id") or "").strip().lower() in ROUTER_META_MODEL_IDS
+
+
+def _is_auto_selectable_model(model: dict[str, Any]) -> bool:
+    return _produces_text(model) and not _is_router_meta_model(model) and not _has_negative_pricing(model)
+
+
+def _has_negative_pricing(model: dict[str, Any]) -> bool:
+    pricing = model.get("pricing") or {}
+    return _is_negative_number(pricing.get("prompt")) or _is_negative_number(pricing.get("completion"))
+
+
+def _is_negative_number(value: Any) -> bool:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(number) and number < 0
+
+
 def _to_float(value: Any) -> float:
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return 0.0
+    if not math.isfinite(number) or number < 0:
+        return 0.0
+    return number

@@ -16,8 +16,19 @@ class AdversarialTesterAgent:
         fallback = {"stress_tests": [self._local_test(version) for version in versions]}
         result = self.client.chat_json(
             system_prompt=(
-                "You are an adversarial prompt tester. Test how a prompt could be misunderstood, "
-                "produce vague output, miss constraints, or create unsafe output."
+                "You are an adversarial tester in a prompt-optimization pipeline. For each candidate "
+                "PROMPT, imagine a capable but literal AI executing it and find the ways it goes wrong: "
+                "misread intent, vague or generic output, ignored constraints, missing output format, or "
+                "unsafe content. Name concrete failure modes, not generic categories.\n"
+                "For software/system (blueprint) prompts, probe specifically for: shallow architecture "
+                "(headers without decisions), invented or unverifiable tools/APIs/repos, missing build "
+                "phases or tests, and unsafe or unauthorized technical steps.\n"
+                "Also probe whether the prompt merely wraps the raw request in generic prompt-engineering "
+                "sections instead of carrying a deep interpretation, implied requirements, hidden decisions, "
+                "and failure modes into the final instructions.\n"
+                "Set high_risk_failures to true when at least one failure mode would likely yield "
+                "fabricated, unsafe, or materially wrong output (e.g. the prompt invites invented tools, "
+                "omits all output control, or enables harmful actions); otherwise false. Return strict JSON."
             ),
             user_prompt=f"""
 Intent:
@@ -32,6 +43,7 @@ Return JSON:
             fallback=fallback,
             model=target_model,
             max_tokens=2600,
+            reasoning_enabled=False,
         )
         tests = result.get("stress_tests", fallback["stress_tests"])
         return tests if isinstance(tests, list) else fallback["stress_tests"]
@@ -46,6 +58,8 @@ Return JSON:
             failure_modes.append("The model may ignore boundaries or exclusions.")
         if "Quality Check" not in prompt:
             failure_modes.append("The model may not verify the answer before final output.")
+        if not any(marker in prompt.lower() for marker in ["task understanding", "deep reading", "underlying intent", "implied requirements"]):
+            failure_modes.append("The model may produce a generic answer because the prompt lacks a deep reading of the request.")
         if any(word in prompt.lower() for word in ["build", "system", "app", "agent", "api", "ide"]):
             blueprint_terms = ["architecture", "tech stack", "database", "roadmap", "testing", "security"]
             if sum(1 for term in blueprint_terms if term in prompt.lower()) < 4:
