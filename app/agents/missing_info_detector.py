@@ -18,8 +18,13 @@ class MissingInformationDetectorAgent:
         fallback = self._local_detect(raw_prompt, intent)
         return self.client.chat_json(
             system_prompt=(
-                "You detect missing information in rough prompts. "
-                "Ask for clarification only when the missing detail would materially change the final prompt."
+                "You find genuinely important gaps in a rough request. Your bias is to PROCEED with "
+                "explicit, reasonable assumptions; only raise a clarifying question when a missing detail "
+                "would materially change the final prompt's structure, scope, safety, or output — not for "
+                "nice-to-have polish.\n"
+                "Identify the missing fields, the few questions worth asking (at most 3, each high-value), "
+                "whether the work can continue on assumptions, and a risk_level for proceeding without "
+                "answers. Prefer fewer, sharper questions over many shallow ones. Return strict JSON."
             ),
             user_prompt=f"""
 Raw prompt:
@@ -31,10 +36,15 @@ Intent:
 Context:
 {context}
 
-Return JSON with missing_fields, critical_questions, can_continue_with_assumptions, risk_level.
+Return JSON with:
+- missing_fields: list of short strings
+- critical_questions: list of plain-text question strings (max 3); each one a single question, not a nested object
+- can_continue_with_assumptions: boolean
+- risk_level: "low" | "medium" | "high"
 """,
             fallback=fallback,
             model=target_model,
+            reasoning_enabled=False,
         )
 
     def _local_detect(self, raw_prompt: str, intent: dict[str, Any]) -> dict[str, Any]:

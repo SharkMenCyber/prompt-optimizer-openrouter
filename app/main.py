@@ -28,7 +28,7 @@ from app.schemas import (
 )
 from app.security import safe_error_message
 from app.services.hermes_adapter import HermesAdapter
-from app.services.openrouter_client import OpenRouterClient
+from app.services.openrouter_client import LOCKED_TEXT_MODEL, OpenRouterClient
 from app.utils.json_tools import derive_title
 
 
@@ -72,7 +72,12 @@ async def add_security_headers(request: Request, call_next):
         "form-action 'self'; "
         "frame-ancestors 'none'"
     )
-    if request.url.path.startswith("/api/"):
+    # Localhost desktop app: never let the embedded WebView serve a stale screen.
+    # API responses AND the static HTML/JS/CSS shell are marked no-store so an
+    # updated build shows up immediately instead of a cached older version (the
+    # cause of "I don't see my new feature" after the screen files change).
+    path = request.url.path
+    if path.startswith("/api/") or path == "/" or path.endswith((".html", ".js", ".css")):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -163,8 +168,10 @@ def models() -> dict:
         return {"configured": False, "selected_model": None, "models": []}
 
     try:
-        model_list = client.list_models()
         selected = client.select_model()
+        model_list = [item for item in client.list_models() if item.get("id") == selected]
+        if not model_list:
+            model_list = [{"id": LOCKED_TEXT_MODEL, "name": "DeepSeek: DeepSeek V4 Pro"}]
         return {
             "configured": True,
             "selected_model": selected,

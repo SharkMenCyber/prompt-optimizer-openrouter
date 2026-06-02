@@ -21,12 +21,14 @@ class PromptBuilderAgent:
         version_count: int,
         target_model: str | None = None,
         model_profile: dict[str, Any] | None = None,
+        deep_interpretation: dict[str, Any] | None = None,
     ) -> list[dict[str, str]]:
         policy = assess_prompt_policy(raw_prompt, mode=get_settings().policy_mode)
         raw_prompt = redact_text(raw_prompt) or ""
         if policy.is_disallowed:
             return self._policy_redirect_versions(raw_prompt, policy.as_dict(), version_count)
 
+        deep_interpretation = deep_interpretation or {}
         quality_mode = self._quality_mode(raw_prompt, intent)
         fallback_versions = self._local_versions(
             raw_prompt,
@@ -36,6 +38,7 @@ class PromptBuilderAgent:
             version_count,
             model_profile=model_profile,
             quality_mode=quality_mode,
+            deep_interpretation=deep_interpretation,
         )
         fallback = {
             "versions": fallback_versions,
@@ -43,14 +46,7 @@ class PromptBuilderAgent:
         }
         mode_requirements = self._mode_requirements(quality_mode)
         result = self.client.chat_json(
-            system_prompt=(
-                "You are a senior prompt engineering architect. Your job is to rewrite rough user prompts "
-                "into production-grade prompts that another advanced AI can follow. Do not answer the user's "
-                "task. Build the prompt that will make another AI answer the task deeply. Avoid generic wrappers. "
-                "For complex software, product, architecture, research, or system-building requests, produce "
-                "blueprint-level prompts with architecture decisions, components, integrations, database/memory "
-                "design, phase roadmaps, testing, safety/security controls, and exact output sections."
-            ),
+            system_prompt=self._system_prompt(quality_mode),
             user_prompt=f"""
 Raw prompt:
 {compact_text(raw_prompt)}
@@ -60,6 +56,9 @@ Intent:
 
 Context:
 {context}
+
+Deep interpretation:
+{deep_interpretation}
 
 Clarification assumptions:
 {clarification}
@@ -74,7 +73,9 @@ Quality mode:
 
 Requirements:
 - Preserve the user's actual idea and wording where useful, but expand it into a complete expert prompt.
+- Treat the Deep interpretation as the backbone of the prompt. Convert its implied requirements, hidden decisions, expansion targets, and likely failure modes into concrete sections or instructions in prompt_text.
 - Include domain-specific sections instead of only generic Role/Objectives/Instructions.
+- The prompt_text must feel like it understood the raw request deeply. It must not read like a reusable template with the raw prompt pasted into it.
 - Do not add architecture, database, API, terminal, cybersecurity, agent, roadmap, or research sections unless they are directly relevant to the raw prompt.
 - Do not expose internal optimizer scaffolding in prompt_text. Never include target model names, optimization style labels, model-specific guidance sections, memory/reuse guidance sections, or "original idea to preserve" helper text.
 - Follow these mode-specific requirements:
@@ -116,7 +117,9 @@ Return JSON:
         version_count: int,
         model_profile: dict[str, Any] | None = None,
         quality_mode: str | None = None,
+        deep_interpretation: dict[str, Any] | None = None,
     ) -> list[dict[str, str]]:
+        deep_interpretation = deep_interpretation or {}
         if quality_mode == "advanced_system_blueprint":
             return self._blueprint_versions(
                 raw_prompt=raw_prompt,
@@ -125,6 +128,7 @@ Return JSON:
                 clarification=clarification,
                 version_count=version_count,
                 model_profile=model_profile,
+                deep_interpretation=deep_interpretation,
             )
         if quality_mode == "expert_persona_prompt":
             return self._persona_versions(
@@ -134,6 +138,7 @@ Return JSON:
                 clarification=clarification,
                 version_count=version_count,
                 model_profile=model_profile,
+                deep_interpretation=deep_interpretation,
             )
 
         strategies = [
@@ -150,6 +155,7 @@ Return JSON:
         profile_controls = "\n".join(
             f"- {item}" for item in profile.get("recommended_prompt_controls", [])
         ) or "- Keep output requirements concrete."
+        deep_brief = self._deep_brief(deep_interpretation)
 
         for label, strategy in strategies[:version_count]:
             prompt_text = f"""# Role
@@ -162,15 +168,20 @@ Help the user accomplish this goal:
 # Context
 {context.get("background", "Use the available user request as the primary source of truth.")}
 
+# Task Understanding
+{deep_brief}
+
 # Assumptions
 {assumptions}
 
 # Instructions
 1. Identify the user's real goal before producing the answer.
-2. Fill small missing details with reasonable assumptions and state them briefly.
-3. Break complex work into clear steps.
-4. Prioritize correctness, usefulness, and directness.
-5. Do not invent facts that are not provided or logically implied.
+2. Use the Task Understanding section as the backbone of the response, not as optional background.
+3. Fill small missing details with reasonable assumptions and state them briefly.
+4. Break complex work into clear steps.
+5. Address the implied requirements, hidden decisions, and likely failure modes before finalizing.
+6. Prioritize correctness, usefulness, and directness.
+7. Do not invent facts that are not provided or logically implied.
 
 # Constraints
 {constraints}
@@ -188,7 +199,7 @@ Return a structured Markdown answer with:
 # Quality Check
 Before finalizing, check that the answer is specific, complete, safe, and aligned with the original request."""
             if strategy == "compact":
-                prompt_text = prompt_text.replace("2. Fill small missing details with reasonable assumptions and state them briefly.\n", "")
+                prompt_text = prompt_text.replace("3. Fill small missing details with reasonable assumptions and state them briefly.\n", "")
             if strategy == "verification-heavy":
                 prompt_text += "\n\n# Verification\nList possible misunderstandings, then revise the answer to avoid them."
             versions.append(
@@ -210,6 +221,7 @@ Before finalizing, check that the answer is specific, complete, safe, and aligne
         clarification: dict[str, Any],
         version_count: int,
         model_profile: dict[str, Any] | None = None,
+        deep_interpretation: dict[str, Any] | None = None,
     ) -> list[dict[str, str]]:
         strategies = [
             ("v1_persona_designer", "expert-persona"),
@@ -226,6 +238,7 @@ Before finalizing, check that the answer is specific, complete, safe, and aligne
         )
         constraints = self._persona_constraints(context)
         user_intent = self._persona_intent_to_preserve(raw_prompt, intent)
+        deep_brief = self._deep_brief(deep_interpretation or {}, include_failure_modes=False)
         for label, strategy in strategies[:version_count]:
             emphasis = self._persona_emphasis(strategy)
             prompt_text = f"""# Role
@@ -239,6 +252,9 @@ Turn the user's design request into a visually impressive, usable interface or d
 # Original User Intent To Preserve
 {user_intent}
 
+# Deep Design Reading
+{deep_brief}
+
 # Capabilities
 - Analyze visual inspiration and infer layout, spacing, typography, color, depth, hierarchy, and interaction style.
 - Create original UI concepts when no image is provided.
@@ -249,11 +265,12 @@ Turn the user's design request into a visually impressive, usable interface or d
 
 # Design Workflow
 1. Identify the type of interface or component the user wants.
-2. Extract the visual style from the prompt or image inspiration.
-3. Decide the layout, hierarchy, spacing, typography, color palette, and component states.
-4. Build the design with practical CSS and semantic HTML when code is requested.
-5. Make the result responsive and readable on desktop and mobile.
-6. Check the final design for alignment, contrast, spacing, overflow, and visual polish.
+2. Use the Deep Design Reading to infer the user's real aesthetic and implementation need.
+3. Extract the visual style from the prompt or image inspiration.
+4. Decide the layout, hierarchy, spacing, typography, color palette, and component states.
+5. Build the design with practical CSS and semantic HTML when code is requested.
+6. Make the result responsive and readable on desktop and mobile.
+7. Check the final design for alignment, contrast, spacing, overflow, and visual polish.
 
 # Visual Input Handling
 - If an image is provided, describe the important visual traits before applying them.
@@ -330,6 +347,7 @@ Before finalizing, verify that:
         clarification: dict[str, Any],
         version_count: int,
         model_profile: dict[str, Any] | None = None,
+        deep_interpretation: dict[str, Any] | None = None,
     ) -> list[dict[str, str]]:
         strategies = [
             ("v1_blueprint", "advanced-blueprint"),
@@ -354,6 +372,10 @@ Before finalizing, verify that:
             "- Prefer practical beginner-buildable steps while preserving an advanced architecture."
         )
         integration_lines = "\n".join(f"- {item}" for item in integrations) or "- Identify useful integrations from the user's request."
+        essence_summary = self._deep_essence_summary(deep_interpretation or {})
+        implied_requirements = self._list_lines((deep_interpretation or {}).get("implied_requirements"))
+        hidden_decisions = self._list_lines((deep_interpretation or {}).get("hidden_decisions"))
+        expansion_targets = self._list_lines((deep_interpretation or {}).get("expansion_targets"))
 
         for label, strategy in strategies[:version_count]:
             emphasis = self._strategy_emphasis(strategy)
@@ -364,6 +386,12 @@ I want you to transform the following rough idea into a complete expert-level im
 ## Project Brief
 
 {raw_prompt.strip()}
+
+---
+
+## What You're Really Building
+
+{essence_summary}
 
 ---
 
@@ -392,6 +420,24 @@ The final response should help a beginner understand what to build, why each par
 
 ---
 
+## Implied Requirements To Preserve And Expand
+
+{implied_requirements}
+
+---
+
+## Hidden Decisions The Answer Must Surface
+
+{hidden_decisions}
+
+---
+
+## Areas That Need Extra Depth
+
+{expansion_targets}
+
+---
+
 ## Assumptions
 
 {assumptions}
@@ -409,12 +455,13 @@ The final response should help a beginner understand what to build, why each par
 Before giving the build plan, analyze the project in this order:
 
 1. Restate the user's real goal in simple language.
-2. Identify the target users and what they need to accomplish.
-3. Identify hidden requirements, risks, and missing decisions.
-4. Compare possible architectures and recommend the best practical path.
-5. Explain what should be built first for an MVP and what should wait.
-6. Explain how agents, tools, memory, and execution permissions should work together.
-7. Explain what is realistic now and what belongs in a future version.
+2. Explain the deeper need behind the brief, including why a generic answer would fail.
+3. Identify the target users and what they need to accomplish.
+4. Identify hidden requirements, risks, and missing decisions.
+5. Compare possible architectures and recommend the best practical path.
+6. Explain what should be built first for an MVP and what should wait.
+7. Explain how agents, tools, memory, and execution permissions should work together.
+8. Explain what is realistic now and what belongs in a future version.
 
 ---
 
@@ -651,6 +698,62 @@ Before finalizing, verify that the answer:
             )
         return versions
 
+    def _deep_brief(self, deep_interpretation: dict[str, Any], include_failure_modes: bool = True) -> str:
+        deep = deep_interpretation or {}
+        sections = [
+            ("Essence", deep.get("essence")),
+            ("Deeper intent", deep.get("deeper_intent")),
+            ("Domain signals", self._list_lines(deep.get("domain_signals"))),
+            ("Implied requirements", self._list_lines(deep.get("implied_requirements"))),
+            ("Hidden decisions", self._list_lines(deep.get("hidden_decisions"))),
+            ("Depth targets", self._list_lines(deep.get("expansion_targets"))),
+            ("Quality dimensions", self._list_lines(deep.get("quality_dimensions"))),
+        ]
+        if include_failure_modes:
+            sections.append(("Likely failure modes to prevent", self._list_lines(deep.get("likely_failure_modes"))))
+        sections.append(("Best framing", deep.get("prompt_angle")))
+
+        lines = []
+        for label, value in sections:
+            text = str(value or "").strip()
+            if text:
+                lines.append(f"{label}:\n{text}")
+        return "\n\n".join(lines) or "Use the raw request as the source of truth and make the response specific to it."
+
+    def _deep_essence_summary(self, deep_interpretation: dict[str, Any]) -> str:
+        """Short, plain-language grounding for the blueprint: what the user
+        really wants, in 1-2 sentences. The full internal interpretation
+        (domain signals, implied requirements, hidden decisions, etc.) already
+        drives the dedicated sections below, so dumping it verbatim here only
+        duplicated content and cluttered the final prompt."""
+        deep = deep_interpretation or {}
+        essence = str(deep.get("essence") or "").strip()
+        deeper = str(deep.get("deeper_intent") or "").strip()
+        parts = [p for p in (essence, deeper) if p]
+        # Avoid restating the same idea twice when essence and deeper_intent overlap.
+        if len(parts) == 2 and (parts[0] in parts[1] or parts[1] in parts[0]):
+            parts = [max(parts, key=len)]
+        return " ".join(parts).strip() or (
+            "Stay specific to the exact request above; do not produce a generic, reusable answer."
+        )
+
+    def _list_lines(self, value: Any) -> str:
+        if isinstance(value, list):
+            items = value
+        elif value:
+            items = [value]
+        else:
+            items = []
+        lines = []
+        for item in items:
+            if isinstance(item, dict):
+                text = str(item.get("text") or item.get("requirement") or item.get("decision") or item.get("name") or "").strip()
+            else:
+                text = str(item).strip()
+            if text:
+                lines.append(f"- {text}")
+        return "\n".join(lines) or "- Use the raw request as the source of truth."
+
     def _normalize_versions(
         self,
         versions: Any,
@@ -721,89 +824,110 @@ Before finalizing, verify that the answer:
         structural_hits = sum(1 for term in structural_terms if term in text)
         supporting_hits = sum(1 for term in supporting_terms if term in text)
         is_blueprint = (
-            intent.get("task_type") in {"software", "research"}
+            # Software/system builds always get the full blueprint treatment.
+            intent.get("task_type") == "software"
+            # Two or more structural markers signal a genuine system-design request.
             or structural_hits >= 2
+            # One structural marker + two supporting markers also qualifies.
             or (structural_hits >= 1 and supporting_hits >= 2)
+            # Research only gets blueprint mode when at least one structural term
+            # is present — "research for building a system" qualifies, but
+            # "research best email tools" should stay a standard prompt.
+            or (intent.get("task_type") == "research" and structural_hits >= 1)
         )
         if is_blueprint:
             return "advanced_system_blueprint"
         return "standard_prompt"
 
     def _too_shallow(self, prompt_text: str, quality_mode: str) -> bool:
+        """Decide whether the AI builder output is genuinely too weak to ship,
+        in which case the caller swaps in the focused local template.
+
+        IMPORTANT: this checks for CONCEPT COVERAGE (via synonym groups) plus real
+        shallowness signals (too short, leaked builder scaffolding, or degenerating
+        into the generic assistant wrapper). It deliberately does NOT demand exact
+        template section names. A strong, well-structured AI prompt that names its
+        sections differently than our local template — "High-Level Architecture"
+        instead of "Architecture Options", "Technology Stack Summary" instead of
+        "Recommended Tech Stack", "Data & Memory Model" instead of "Database" — must
+        NOT be rejected. Doing so deletes the model's tailored, domain-specific work
+        and replaces it with one-size-fits-all boilerplate, which is the exact
+        opposite of "going deeper into the request"."""
         lowered = prompt_text.lower()
-        generic_markers = [
+        length = len(prompt_text)
+
+        # Builder-only helper text that must never reach a final prompt. If any of
+        # these leak through, fall back regardless of how good the rest looks.
+        leaked_internal_sections = [
+            "additional model-specific guidance",
+            "model-specific guidance",
+            "target model:",
+            "optimization style:",
+            "memory and reuse guidance",
+            "original user idea to preserve",
+            "this must not become a generic answer",
+        ]
+        if any(section in lowered for section in leaked_internal_sections):
+            return True
+
+        # The generic standard-assistant wrapper: a tell that the model produced a
+        # hollow Role/Objective shell instead of a task-specific prompt.
+        generic_wrapper_markers = [
             "help the user accomplish this goal",
             "you are an expert assistant specialized in",
             "return a structured markdown answer with",
         ]
+
+        def _coverage(groups: list[list[str]]) -> int:
+            """Count how many concept groups have at least one synonym present."""
+            return sum(1 for group in groups if any(term in lowered for term in group))
+
         if quality_mode == "advanced_system_blueprint":
-            required_sections = [
-                "architecture options",
-                "agent design",
-                "recommended tech stack",
-                "database",
-                "roadmap",
-                "security",
-                "open-source",
-                "output format",
-            ]
-            required_markers = [
-                "architecture",
-                "agent",
-                "tech stack",
-                "database",
-                "roadmap",
-                "security",
-                "testing",
-                "phase",
-                "workflow",
-                "open-source",
-            ]
-            marker_hits = sum(1 for marker in required_markers if marker in lowered)
-            missing_required_sections = [section for section in required_sections if section not in lowered]
-            leaked_internal_sections = [
-                "additional model-specific guidance",
-                "model-specific guidance",
-                "target model:",
-                "optimization style:",
-                "memory and reuse guidance",
-                "original user idea to preserve",
-                "this must not become a generic answer",
+            concept_groups = [
+                ["architecture", "system design", "high-level design", "component breakdown", "components"],
+                ["database", "data model", "memory model", "data & memory", "schema", "storage", "persistence"],
+                ["roadmap", "phase", "milestone", "mvp"],
+                ["integration", "api", "interface", "boundary", "endpoint"],
+                ["security", "permission", "safety", "secret", "sandbox"],
+                ["test", "verification", "quality check"],
+                ["trade-off", "tradeoff", "options", "compare", "alternative", "pros and cons"],
+                ["tech stack", "technology stack", "stack", "framework", "library", "tools"],
             ]
             return (
-                len(prompt_text) < 2400
-                or marker_hits < 6
-                or bool(missing_required_sections)
-                or any(section in lowered for section in leaked_internal_sections)
+                length < 2000
+                or _coverage(concept_groups) < 5
+                or any(marker in lowered for marker in generic_wrapper_markers)
             )
+
         if quality_mode == "expert_persona_prompt":
-            required_sections = [
-                "role",
-                "objective",
-                "capabilities",
-                "design workflow",
-                "visual input",
-                "css",
-                "output format",
-                "quality",
-            ]
+            # A persona/design prompt must NOT carry system-build scaffolding — if
+            # it does, the wrong template fired and the result is off-topic.
             unrelated_sections = [
                 "architecture options",
-                "database",
-                "api key",
-                "safe terminal",
-                "cybersecurity lab",
                 "agent design",
                 "open-source tools research",
                 "phase-by-phase roadmap",
-                "model-specific guidance",
-                "target model:",
-                "optimization style:",
+                "cybersecurity lab",
             ]
-            missing_required_sections = [section for section in required_sections if section not in lowered]
-            unrelated_hits = [section for section in unrelated_sections if section in lowered]
-            return len(prompt_text) < 1400 or bool(missing_required_sections) or bool(unrelated_hits)
-        return len(prompt_text) < 650 and any(marker in lowered for marker in generic_markers)
+            if any(section in lowered for section in unrelated_sections):
+                return True
+            concept_groups = [
+                ["role", "you are", "act as", "persona", "specialist"],
+                ["design", "visual", "css", "html", "layout", "typography", "color", "interface"],
+                ["workflow", "process", "step", "approach", "how to handle"],
+                ["output", "format", "deliver", "return"],
+                ["quality", "check", "review", "verify", "polish", "contrast"],
+                ["image", "screenshot", "inspiration", "reference", "input"],
+            ]
+            return (
+                length < 1000
+                or _coverage(concept_groups) < 4
+                or any(marker in lowered for marker in generic_wrapper_markers)
+            )
+
+        # Standard single-task prompt: reject only genuinely tiny output, or short
+        # output that has degenerated into the generic assistant wrapper.
+        return length < 400 or (length < 900 and any(marker in lowered for marker in generic_wrapper_markers))
 
     def _is_persona_prompt(self, text: str) -> bool:
         explicit_design_prompt_request = any(
@@ -911,6 +1035,47 @@ Before finalizing, verify that the answer:
                 text = goal
         return compact_text(text, limit=700)
 
+    def _system_prompt(self, quality_mode: str) -> str:
+        """Mode-aware builder system prompt. A shared core sets the role and output
+        discipline; a per-mode directive then steers depth so blueprints get deep
+        architecture guidance while design/standard prompts are not bloated with it."""
+        core = (
+            "You are a senior prompt-engineering architect. You rewrite a rough user request into a "
+            "production-grade PROMPT that another advanced AI will execute. You never answer the user's "
+            "task yourself — you build the instructions that make another AI answer it excellently. "
+            "Output ONLY the prompt text: no preamble, no explanation, no meta-commentary, and never "
+            "reference these instructions, the optimizer, the target model, or 'the user's prompt'. "
+            "Avoid hollow Role/Objective/Instructions wrappers. Every section must carry task-specific "
+            "substance from the raw request and the supplied deep interpretation. Convert implied needs, "
+            "hidden decisions, and likely failure modes into concrete instructions the downstream AI must follow."
+        )
+        if quality_mode == "advanced_system_blueprint":
+            directive = (
+                " This request is a software/system build. Produce a blueprint-level prompt that forces the "
+                "downstream AI to make concrete architecture DECISIONS with explicit trade-offs — not merely list "
+                "section headers. Require: component breakdown, the data/memory model, integration and API "
+                "boundaries, a phase-by-phase build roadmap with testable milestones, named failure modes, and "
+                "security/permission controls. Demand realism: instruct the AI to use only real, verifiable tools "
+                "and to flag assumptions instead of inventing APIs, repositories, or capabilities. Favor depth and "
+                "specificity over breadth — a developer should be able to start building straight from the answer."
+            )
+        elif quality_mode == "expert_persona_prompt":
+            directive = (
+                " This request is a persona/instruction prompt (e.g. a visual or CSS design specialist), NOT a "
+                "software architecture build. Focus the prompt on role, capabilities, how to handle the user's "
+                "input (text or image), concrete output rules (e.g. complete HTML/CSS), an interaction workflow, "
+                "and visual quality checks. Do NOT add architecture, database, API-key, terminal, or roadmap "
+                "sections unless the raw request explicitly asks for them."
+            )
+        else:
+            directive = (
+                " This is a focused single-task prompt. Keep it tight and specific to the user's actual task: a "
+                "clear objective, a task-understanding section, only the constraints that matter, an explicit "
+                "output format, and a short quality check. Do not inflate it with architecture, roadmap, or "
+                "system-design scaffolding unless the raw prompt implies that depth."
+            )
+        return core + directive
+
     def _mode_requirements(self, quality_mode: str) -> str:
         if quality_mode == "advanced_system_blueprint":
             return (
@@ -926,12 +1091,21 @@ Before finalizing, verify that the answer:
                 "database design, API key storage, terminal execution, cybersecurity labs, open-source research, "
                 "phase roadmaps, model identifiers, or model-specific guidance unless the raw prompt explicitly asks for them."
             )
-        return "- This is a standard prompt rewrite. Keep the structure specific to the user's actual task."
+        return (
+            "- This is a standard prompt rewrite. Include a compact task-understanding section, "
+            "the implied requirements that matter, hidden decisions to handle, output format, and "
+            "quality checks specific to the request."
+        )
 
     def _clean_internal_scaffolding(self, prompt_text: str, quality_mode: str) -> str:
         """Remove builder-only helper sections that should never appear in final prompts."""
         text = prompt_text.strip()
         block_patterns = [
+            # The "Deep Reading Of The Brief" block is the optimizer's internal
+            # interpretation dump. It should shape the prompt, not appear in it.
+            # Older prompts (and refinements that faithfully preserve their
+            # structure) can still carry this block, so strip it defensively.
+            r"\n?#{1,6}\s*Deep Reading Of The Brief\b.*?(?=\n#{1,6}\s|\n---|\Z)",
             r"\n?#{1,6}\s*Model-Specific Guidance\s*\n.*?(?=\n#{1,6}\s|\n---|\Z)",
             r"\n?Additional model-specific guidance:\s*\n.*?(?=\n#{1,6}\s|\n---|\Z)",
             r"\n?Memory and reuse guidance:\s*\n.*?(?=\n#{1,6}\s|\n---|\Z)",
@@ -945,8 +1119,11 @@ Before finalizing, verify that the answer:
             )
         for pattern in block_patterns:
             text = re.sub(pattern, "\n", text, flags=re.IGNORECASE | re.DOTALL)
+        # Collapse runs of separators left behind by removed sections into a
+        # single, well-spaced rule (blank line on each side) so a stripped block
+        # never leaves "---## Next Heading" jammed together, then tidy blank runs.
+        text = re.sub(r"(?:\n\s*-{3,}\s*){2,}", "\n\n---\n\n", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
-        text = re.sub(r"(?:\n\s*---\s*){2,}", "\n\n---", text)
         return text.strip()
 
     def _blueprint_role(self, raw_prompt: str, intent: dict[str, Any]) -> str:

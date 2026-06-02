@@ -16,8 +16,22 @@ class PromptCriticAgent:
         fallback = {"critiques": [self._local_critique(version) for version in versions]}
         result = self.client.chat_json(
             system_prompt=(
-                "You are a prompt critic. Find ambiguity, weak wording, missing details, "
-                "unclear output requirements, and practical risks."
+                "You are a senior prompt critic in an optimization pipeline. Judge each candidate as a "
+                "PROMPT — instructions another AI must follow — not as a finished answer. Ask: will this "
+                "prompt force a strong, specific, safe result, or does it leave room for a vague or "
+                "fabricated one? Weigh clarity, specificity, completeness, explicit output format, "
+                "constraint quality, and safety.\n"
+                "For software/system (blueprint) prompts, a strong prompt must demand concrete architecture "
+                "decisions, a data/memory model, integration/API boundaries, a phased roadmap with testable "
+                "milestones, named failure modes, security controls, and realism (no invented tools or APIs). "
+                "Report each missing dimension as a specific weakness paired with a concrete fix.\n"
+                "For every prompt, check whether it contains a deep task reading: underlying intent, implied "
+                "requirements, hidden decisions, and failure modes. Penalize polished generic wrappers that do "
+                "not show understanding of the raw request.\n"
+                "Set risk_level to 'high' when the prompt is a generic wrapper, would let the AI invent "
+                "tools/APIs, omits an output format, or could produce unsafe output; 'medium' for fixable "
+                "gaps; 'low' only when it is genuinely strong. Be practical and direct, not flattering. "
+                "Return strict JSON."
             ),
             user_prompt=f"""
 Intent:
@@ -32,6 +46,7 @@ Return JSON:
             fallback=fallback,
             model=target_model,
             max_tokens=2600,
+            reasoning_enabled=False,
         )
         critiques = result.get("critiques", fallback["critiques"])
         return critiques if isinstance(critiques, list) else fallback["critiques"]
@@ -50,6 +65,9 @@ Return JSON:
         if len(prompt) < 500:
             weaknesses.append("Prompt may be too short for complex tasks.")
             fixes.append("Add context, constraints, and a quality check.")
+        if not any(marker in prompt.lower() for marker in ["task understanding", "deep reading", "underlying intent", "implied requirements"]):
+            weaknesses.append("Prompt does not show a deep reading of the raw request.")
+            fixes.append("Add a task-understanding section with implied requirements, hidden decisions, and likely failure modes.")
         blueprint_terms = [
             "architecture options",
             "agent design",

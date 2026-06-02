@@ -1,10 +1,12 @@
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, TypeVar
 
 from app.agents.adversarial_tester import AdversarialTesterAgent
 from app.agents.clarification import ClarificationAgent
 from app.agents.context_engineer import ContextEngineerAgent
+from app.agents.deep_interpreter import DeepInterpreterAgent
 from app.agents.hermes_orchestrator import HermesOrchestratorAgent
 from app.agents.intent_analyzer import IntentAnalyzerAgent
 from app.agents.memory_agent import MemoryAgent
@@ -31,6 +33,7 @@ class PromptOptimizationPipeline:
         self.repository = repository or PromptRepository()
         self.client = client or OpenRouterClient()
         self.intent_analyzer = IntentAnalyzerAgent(self.client)
+        self.deep_interpreter = DeepInterpreterAgent(self.client)
         self.context_engineer = ContextEngineerAgent(self.client)
         self.missing_detector = MissingInformationDetectorAgent(self.client)
         self.clarifier = ClarificationAgent()
@@ -133,6 +136,28 @@ class PromptOptimizationPipeline:
                     "policy": policy,
                 },
             )
+            deep_interpretation = self._trace_step(
+                run_trace,
+                "Deep Interpreter Agent",
+                "Create a safe redirection reading without deepening disallowed instructions.",
+                lambda: {
+                    "essence": "The request should be redirected to safe, defensive, or educational help.",
+                    "literal_request": "[redacted by policy layer]",
+                    "deeper_intent": "Avoid strengthening harmful content while preserving a constructive path.",
+                    "domain_signals": ["policy_redirect"],
+                    "implied_requirements": [
+                        "Do not optimize harmful instructions.",
+                        "Offer a defensive or authorization-bound alternative.",
+                    ],
+                    "hidden_decisions": ["Which safe alternative best matches the user's broader goal?"],
+                    "expansion_targets": ["Safety boundary", "Defensive checklist", "Authorized-work clarification"],
+                    "quality_dimensions": ["Safety", "Usefulness", "Policy compliance"],
+                    "likely_failure_modes": ["Accidentally improving the harmful request."],
+                    "constraints_to_preserve": ["Do not provide operational abuse guidance."],
+                    "prompt_angle": "Policy-bounded redirection prompt.",
+                    "source": "local_policy_redirect",
+                },
+            )
             memory_matches = self._trace_step(
                 run_trace,
                 "Memory Agent",
@@ -186,6 +211,12 @@ class PromptOptimizationPipeline:
                 "Detect goal, task type, audience, target platform, and hidden requirements.",
                 lambda: self.intent_analyzer.analyze(raw_prompt, target_model=target_model),
             )
+            deep_interpretation = self._trace_step(
+                run_trace,
+                "Deep Interpreter Agent",
+                "Read the raw prompt for underlying intent, implied requirements, hidden decisions, and failure modes.",
+                lambda: self.deep_interpreter.interpret(raw_prompt, intent=intent, target_model=target_model),
+            )
             memory_matches = self._trace_step(
                 run_trace,
                 "Memory Agent",
@@ -204,6 +235,7 @@ class PromptOptimizationPipeline:
                     raw_prompt=raw_prompt,
                     intent=intent,
                     memory_matches=memory_matches,
+                    deep_interpretation=deep_interpretation,
                     target_model=target_model,
                 ),
             )
@@ -239,19 +271,26 @@ class PromptOptimizationPipeline:
                 version_count=request.versions,
                 target_model=target_model,
                 model_profile=model_profile,
+                deep_interpretation=deep_interpretation,
             ),
         )
-        critiques = self._trace_step(
+        # Critic and tester are independent reads of the same versions, so run
+        # them concurrently instead of back-to-back. On the locked reasoning
+        # model that roughly halves this stage's wall-clock time.
+        critiques, stress_tests = self._trace_steps_parallel(
             run_trace,
-            "Prompt Critic Agent",
-            "Critique ambiguity, missing details, weak wording, and unclear output requirements.",
-            lambda: self.critic.critique(versions=versions, intent=intent, target_model=target_model),
-        )
-        stress_tests = self._trace_step(
-            run_trace,
-            "Adversarial Tester Agent",
-            "Stress-test versions for misunderstanding, vagueness, unsafe output, and missed constraints.",
-            lambda: self.tester.test(versions=versions, intent=intent, target_model=target_model),
+            [
+                (
+                    "Prompt Critic Agent",
+                    "Critique ambiguity, missing details, weak wording, and unclear output requirements.",
+                    lambda: self.critic.critique(versions=versions, intent=intent, target_model=target_model),
+                ),
+                (
+                    "Adversarial Tester Agent",
+                    "Stress-test versions for misunderstanding, vagueness, unsafe output, and missed constraints.",
+                    lambda: self.tester.test(versions=versions, intent=intent, target_model=target_model),
+                ),
+            ],
         )
         scores = self._trace_step(
             run_trace,
@@ -283,6 +322,7 @@ class PromptOptimizationPipeline:
             {"agent_name": "model_profile_agent", "output": model_profile},
             {"agent_name": "policy_layer", "output": policy},
             {"agent_name": "intent_analyzer", "output": intent},
+            {"agent_name": "deep_interpreter", "output": deep_interpretation},
             {"agent_name": "memory_agent", "output": {"matches": memory_matches}},
             {"agent_name": "context_engineer", "output": context},
             {"agent_name": "missing_information_detector", "output": missing_info},
@@ -335,6 +375,7 @@ class PromptOptimizationPipeline:
             "context": context,
             "hermes_plan": hermes_plan,
             "model_profile": model_profile,
+            "deep_interpretation": deep_interpretation,
             "memory_matches": memory_matches,
         }
 
@@ -378,6 +419,74 @@ class PromptOptimizationPipeline:
         )
         self._emit({"type": "agent_done", "agent": agent_name, "status": "completed", "duration_ms": duration})
         return output
+
+    def _trace_steps_parallel(
+        self,
+        run_trace: list[dict[str, Any]],
+        steps: list[tuple[str, str, Callable[[], Any]]],
+    ) -> list[Any]:
+        """Run independent agent steps concurrently (they are I/O-bound model
+        calls). Progress events and trace entries are emitted from the calling
+        thread only — workers never touch the shared run_trace or progress sink,
+        so ordering stays deterministic and the progress callback stays
+        single-threaded. Outputs are redacted to match _trace_step."""
+        for agent_name, description, _ in steps:
+            self._emit({"type": "agent_start", "agent": agent_name, "description": description})
+
+        results: list[Any] = [None] * len(steps)
+        errors: list[Exception | None] = [None] * len(steps)
+        durations: list[int] = [0] * len(steps)
+
+        def _worker(index: int, action: Callable[[], Any]) -> None:
+            start = time.perf_counter()
+            try:
+                results[index] = action()
+            except Exception as exc:  # noqa: BLE001 - surfaced per-step below
+                errors[index] = exc
+            finally:
+                durations[index] = round((time.perf_counter() - start) * 1000)
+
+        with ThreadPoolExecutor(max_workers=len(steps)) as executor:
+            futures = [executor.submit(_worker, i, step[2]) for i, step in enumerate(steps)]
+            for future in futures:
+                future.result()
+
+        for index, (agent_name, description, _) in enumerate(steps):
+            if errors[index] is not None:
+                run_trace.append(
+                    {
+                        "agent": agent_name,
+                        "description": description,
+                        "status": "failed",
+                        "duration_ms": durations[index],
+                        "summary": safe_error_message(errors[index]),
+                        "preview": "",
+                    }
+                )
+                self._emit(
+                    {"type": "agent_done", "agent": agent_name, "status": "failed", "duration_ms": durations[index]}
+                )
+            else:
+                output = redact_value(results[index])
+                results[index] = output
+                run_trace.append(
+                    {
+                        "agent": agent_name,
+                        "description": description,
+                        "status": "completed",
+                        "duration_ms": durations[index],
+                        "summary": self._summarize_output(output),
+                        "preview": self._preview_output(output),
+                    }
+                )
+                self._emit(
+                    {"type": "agent_done", "agent": agent_name, "status": "completed", "duration_ms": durations[index]}
+                )
+
+        for error in errors:
+            if error is not None:
+                raise error
+        return results
 
     def refine(self, request: OptimizeRequest) -> dict[str, Any]:
         """Focused follow-up turn: apply the user's instruction to the previous
@@ -494,11 +603,14 @@ class PromptOptimizationPipeline:
         fallback_text = f"{prior_prompt}\n\n# Additional Requirement\n{instruction}"
         result = self.client.chat_json(
             system_prompt=(
-                "You are a prompt editor. You receive an EXISTING prompt and a user's requested change. "
-                "Return an improved version of the EXISTING prompt that applies the requested change while "
-                "preserving everything that already works. Output ONLY the improved prompt itself: no "
-                "preamble, no explanation, no meta commentary, and never mention 'existing prompt', "
-                "'refinement', or these instructions."
+                "You are a precision prompt editor. You receive an EXISTING optimized prompt and a user's "
+                "requested change. Apply the change surgically: integrate it where it belongs and keep "
+                "everything else that already works — preserve the prompt's structure, depth, section "
+                "headings, and formatting. If the existing prompt is a detailed blueprint, the result must "
+                "stay an equally detailed blueprint, not a shortened summary; do not drop sections, weaken "
+                "constraints, or invent tools or APIs. Output ONLY the improved prompt itself: no preamble, "
+                "no explanation, no meta-commentary, and never mention 'existing prompt', 'refinement', or "
+                "these instructions."
             ),
             user_prompt=(
                 f"EXISTING PROMPT:\n{compact_text(prior_prompt, limit=9000)}\n\n"
@@ -510,8 +622,12 @@ class PromptOptimizationPipeline:
             temperature=0.3,
             max_tokens=6000,
         )
-        text = str(result.get("prompt_text") or "").strip()
-        return text or fallback_text
+        text = str(result.get("prompt_text") or "").strip() or fallback_text
+        # Refinement preserves the prior prompt's structure, so if that prior
+        # prompt carried the internal "Deep Reading" dump (e.g. it was built by
+        # an older version), a surgical edit faithfully carries it forward. Strip
+        # the same scaffolding the builder removes so refined prompts stay clean.
+        return self.builder._clean_internal_scaffolding(text, quality_mode="advanced_system_blueprint")
 
     def _trace_skip(self, run_trace: list[dict[str, Any]], agent_name: str, description: str) -> None:
         run_trace.append(

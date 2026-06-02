@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hermes Prompt Optimizer</title>
-    <link rel="stylesheet" href="/styles.css?v=0.9.3" />
+    <link rel="stylesheet" href="/styles.css?v=0.9.9" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -46,7 +46,21 @@
           </button>
 
           <div class="conv-section">
-            <p class="conv-label">Chats</p>
+            <div class="conv-section-head">
+              <p class="conv-label">Chats</p>
+              <button id="convSelectToggle" class="conv-select-toggle" type="button" title="Select chats to delete">Select</button>
+            </div>
+            <div id="convBulkBar" class="conv-bulk-bar is-hidden">
+              <label class="conv-bulk-all">
+                <input type="checkbox" id="convSelectAll" />
+                <span>All</span>
+              </label>
+              <span id="convSelectedCount" class="conv-selected-count">0 selected</span>
+              <button id="convDeleteSelected" class="conv-bulk-delete" type="button" disabled>
+                <svg class="icon"><use href="#i-trash" /></svg>
+                <span>Delete</span>
+              </button>
+            </div>
             <div id="conversationList" class="conv-list empty">Loading chats...</div>
           </div>
         </div>
@@ -66,6 +80,10 @@
             <span id="sectionTitle">New prompt</span>
           </div>
           <div class="header-actions">
+            <span id="agentWorkIndicator" class="agent-work-indicator is-hidden" role="status" aria-live="polite" aria-atomic="true">
+              <span class="agent-work-spinner" aria-hidden="true"></span>
+              <span id="agentWorkText">Agent working in background</span>
+            </span>
             <span id="modelStatus" class="muted compact-hide">Models loading...</span>
             <span id="healthBadge" class="status-pill">Checking...</span>
             <button id="restartApp" class="btn btn-ghost icon-btn" type="button" title="Restart backend">
@@ -89,13 +107,15 @@
             <div class="composer-card">
               <details id="composerOptions" class="composer-options">
                 <summary>
-                  <span class="composer-summary" id="composerSummary">Auto model · 3 versions · Hermes on</span>
+                  <span class="composer-summary" id="composerSummary">DeepSeek V4 Pro - 3 versions - Hermes on</span>
                   <svg class="icon caret"><use href="#i-chevrons" /></svg>
                 </summary>
                 <div class="composer-controls">
                   <label class="field">
                     <span>Model</span>
-                    <select id="modelSelect"><option value="auto">Auto</option></select>
+                    <select id="modelSelect" disabled>
+                      <option value="deepseek/deepseek-v4-pro">DeepSeek V4 Pro (deepseek/deepseek-v4-pro)</option>
+                    </select>
                   </label>
                   <label class="field">
                     <span>Versions</span>
@@ -212,18 +232,31 @@
     <div id="confirmOverlay" class="setup-overlay is-hidden">
       <div class="setup-card confirm-card">
         <span class="setup-icon danger"><svg class="icon"><use href="#i-trash" /></svg></span>
-        <h1 class="setup-title">Delete this chat?</h1>
+        <h1 id="confirmTitle" class="setup-title">Delete this chat?</h1>
         <p id="confirmText" class="setup-sub">This permanently removes the chat and its optimized prompts. This can't be undone.</p>
         <div class="confirm-actions">
           <button id="confirmCancel" class="btn btn-ghost" type="button">Cancel</button>
           <button id="confirmDelete" class="btn btn-danger" type="button">
             <svg class="icon"><use href="#i-trash" /></svg>
-            <span>Delete chat</span>
+            <span id="confirmDeleteLabel">Delete chat</span>
           </button>
         </div>
       </div>
     </div>
 
-    <script src="/app.js?v=0.9.3"></script>
+    <div id="agentLoadingOverlay" class="agent-loading-overlay is-hidden" role="status" aria-live="polite" aria-atomic="true">
+      <div class="agent-loading-card">
+        <div class="agent-loading-orb" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <p class="eyebrow">Agent running</p>
+        <h1 id="agentLoadingText" class="agent-loading-title">Agent optimizing this prompt</h1>
+        <p id="agentLoadingSubtext" class="agent-loading-sub">Hermes and the prompt agents are working. Results will appear here automatically.</p>
+      </div>
+    </div>
+
+    <script src="/app.js?v=0.9.9"></script>
   </body>
 </html>

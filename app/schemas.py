@@ -65,4 +65,5 @@ class OptimizeResponse(BaseModel):
     context: dict[str, Any]
     hermes_plan: dict[str, Any] | None = None
     model_profile: dict[str, Any] | None = None
+    deep_interpretation: dict[str, Any] | None = None
     memory_matches: list[dict[str, Any]]
