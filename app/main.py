@@ -1,12 +1,16 @@
 import json
 import os
 import queue
+import subprocess
+import tempfile
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -30,6 +34,7 @@ from app.security import safe_error_message
 from app.services.hermes_adapter import HermesAdapter
 from app.services.openrouter_client import LOCKED_TEXT_MODEL, OpenRouterClient
 from app.utils.json_tools import derive_title
+from app.version import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 
 repository = PromptRepository()
@@ -43,7 +48,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Hermes Prompt Optimizer (OpenRouter)", version="0.6.1", lifespan=lifespan)
+app = FastAPI(title="Hermes Prompt Optimizer (OpenRouter)", version=APP_VERSION, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     # Localhost-only desktop tool. The UI is served same-origin, but the backend
@@ -127,6 +132,105 @@ def app_info() -> dict:
         "updates": updates,
         "file_timestamps": static_files,
     }
+
+
+def _version_tuple(value: str) -> tuple:
+    """Parse '1.2.3' / 'v1.2.3' into (1, 2, 3) for safe numeric comparison."""
+    parts: list[int] = []
+    for chunk in str(value or "").strip().lstrip("vV").split("."):
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts) or (0,)
+
+
+def _latest_github_release() -> dict:
+    """Fetch the latest published release for this app from its public GitHub
+    repo. Returns {} when no release exists yet (404)."""
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+    with httpx.Client(timeout=10, follow_redirects=True) as client:
+        response = client.get(
+            url,
+            headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+        )
+    if response.status_code == 404:
+        return {}
+    response.raise_for_status()
+    return response.json()
+
+
+@app.get("/api/update/check")
+def update_check() -> dict:
+    """Compare the running version against the latest GitHub release and report
+    whether a newer installer is available to download."""
+    try:
+        data = _latest_github_release()
+    except Exception as exc:
+        return {"update_available": False, "current_version": APP_VERSION, "error": safe_error_message(exc)}
+    if not data:
+        return {
+            "update_available": False,
+            "current_version": APP_VERSION,
+            "latest_version": None,
+            "message": "No releases published yet.",
+        }
+
+    latest = str(data.get("tag_name") or "")
+    download_url = None
+    for asset in data.get("assets") or []:
+        if str(asset.get("name", "")).lower().endswith(".exe"):
+            download_url = asset.get("browser_download_url")
+            break
+    newer = _version_tuple(latest) > _version_tuple(APP_VERSION)
+    return {
+        "update_available": bool(newer and download_url),
+        "current_version": APP_VERSION,
+        "latest_version": latest.lstrip("vV"),
+        "download_url": download_url,
+        "release_url": data.get("html_url"),
+        "release_notes": (data.get("body") or "")[:4000],
+    }
+
+
+@app.post("/api/update/apply")
+def update_apply(request: Request) -> dict:
+    """Download the latest installer and launch it silently. Inno Setup then
+    closes this running app, wipes the old files, installs the new version, and
+    relaunches it — a one-click update for non-technical users."""
+    if not _is_local_request(request):
+        raise HTTPException(status_code=403, detail="Updates can only be triggered from the local app.")
+
+    info = update_check()
+    download_url = info.get("download_url")
+    if not info.get("update_available") or not download_url:
+        raise HTTPException(status_code=400, detail="No update is available to install.")
+
+    target = Path(tempfile.gettempdir()) / f"PromptOptimizerOpenRouter-Update-{info.get('latest_version', 'latest')}.exe"
+    try:
+        with httpx.Client(timeout=180, follow_redirects=True) as client:
+            with client.stream("GET", download_url) as response:
+                response.raise_for_status()
+                with open(target, "wb") as handle:
+                    for chunk in response.iter_bytes(65536):
+                        handle.write(chunk)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not download the update: {safe_error_message(exc)}") from exc
+
+    # Detached + silent so the installer keeps running after this app closes.
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    try:
+        subprocess.Popen(
+            [str(target), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+            creationflags=creationflags,
+            close_fds=True,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not start the installer: {safe_error_message(exc)}") from exc
+
+    return {"status": "updating", "version": info.get("latest_version")}
 
 
 @app.post("/api/restart")

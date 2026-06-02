@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hermes Prompt Optimizer</title>
-    <link rel="stylesheet" href="/styles.css?v=0.9.9" />
+    <link rel="stylesheet" href="/styles.css?v=0.9.10" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -91,6 +91,11 @@
             </button>
           </div>
         </header>
+
+        <div id="updateBanner" class="update-banner is-hidden" role="status" aria-live="polite">
+          <span id="updateBannerText" class="update-banner-text">A new version is available.</span>
+          <button id="updateNowBtn" class="btn btn-primary" type="button">Update now</button>
+        </div>
 
         <!-- ===================== CHAT VIEW ===================== -->
         <section id="chatView" class="view active">
@@ -257,6 +262,6 @@
       </div>
     </div>
 
-    <script src="/app.js?v=0.9.9"></script>
+    <script src="/app.js?v=0.9.10"></script>
   </body>
 </html>

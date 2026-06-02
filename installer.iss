@@ -4,7 +4,11 @@
 ; so a per-user Program-files location is fine.
 
 #define MyAppName "Prompt Optimizer (OpenRouter)"
-#define MyAppVersion "0.6.1"
+; Version can be injected by the release CI with /DMyAppVersion=0.6.NN; the value
+; here is the local/dev fallback when building by hand.
+#ifndef MyAppVersion
+  #define MyAppVersion "0.6.2"
+#endif
 #define MyAppPublisher "Hermes Prompt Optimizer"
 #define MyAppExeName "Prompt Optimizer OpenRouter.exe"
 #define MyDistDir "dist\Prompt Optimizer OpenRouter"
@@ -28,12 +32,24 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
+; Auto-update support: use the Restart Manager to close the running app so its
+; files can be replaced, and never reboot the PC. The app is relaunched after a
+; silent update by the [Run] entry below.
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
+
+[InstallDelete]
+; Clean-wipe the previous version before copying the new build so no stale files
+; survive an update. Deletes the old code folder and app exe only — the
+; uninstaller (unins000.*) and user data (kept under %LOCALAPPDATA%) are untouched.
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\{#MyAppExeName}"
 
 [Files]
 Source: "{#MyDistDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -45,3 +61,5 @@ Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; After a silent (auto-)update there is no finish page, so relaunch the app here.
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: WizardSilent

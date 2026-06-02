@@ -315,6 +315,22 @@ textarea {
   background: rgba(180, 120, 40, 0.08);
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 12px 16px 0;
+  padding: 12px 16px;
+  border: 1px solid rgba(94, 210, 140, 0.38);
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(70, 200, 120, 0.16), rgba(70, 200, 120, 0.05));
+  color: var(--text);
+}
+.update-banner.is-hidden { display: none; }
+.update-banner-text { font-weight: 700; font-size: 13.5px; }
+.update-banner .btn { white-space: nowrap; }
+
 .agent-work-indicator {
   display: inline-flex;
   align-items: center;
