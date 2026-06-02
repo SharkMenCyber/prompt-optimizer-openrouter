@@ -1,0 +1,73 @@
+name: Build & Release
+
+# Every push to main builds the Windows installer and publishes it as a GitHub
+# Release, so the in-app "click to update" button has a newer version to fetch.
+# Doc-only changes are skipped so they don't spend a build.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+  workflow_dispatch: {}
+
+# Required so the workflow can create Releases with the GITHUB_TOKEN.
+permissions:
+  contents: write
+
+# Never run two release builds at once (keeps version numbers/tags clean).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Compute version (0.7.<build number>) and stamp it into the app
+        id: ver
+        shell: pwsh
+        run: |
+          $version = "0.7.$($env:GITHUB_RUN_NUMBER)"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          (Get-Content app/version.py) -replace 'APP_VERSION = ".*"', "APP_VERSION = ""$version""" | Set-Content app/version.py -Encoding utf8
+          Write-Host "Building version $version"
+          Get-Content app/version.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.20.0
+
+      - name: Build the app (PyInstaller)
+        shell: pwsh
+        run: pyinstaller build.spec --clean --noconfirm
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer (Inno Setup)
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} installer.iss
+
+      - name: Publish the GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
+          $asset = "installer/PromptOptimizerOpenRouter-Setup-$version.exe"
+          if (-not (Test-Path $asset)) { throw "Installer not found at $asset" }
+          gh release create "v$version" "$asset" --title "v$version" --notes "Automated build from commit $env:GITHUB_SHA."

@@ -181,6 +181,34 @@ async function loadHealth() {
   }
 }
 
+/* ======================= App auto-update ======================= */
+async function checkForUpdate() {
+  try {
+    const data = await fetchJson("/api/update/check");
+    if (data && data.update_available && data.latest_version) {
+      const text = $("updateBannerText");
+      if (text) text.textContent = `New version v${data.latest_version} available (you have v${data.current_version}).`;
+      const banner = $("updateBanner");
+      if (banner) banner.classList.remove("is-hidden");
+    }
+  } catch {
+    /* Update check is best-effort: ignore failures (offline, no releases yet, etc.). */
+  }
+}
+
+async function applyUpdate() {
+  const btn = $("updateNowBtn");
+  const text = $("updateBannerText");
+  if (btn) btn.disabled = true;
+  if (text) text.textContent = "Downloading and installing the update… the app will close and reopen by itself. Please wait.";
+  try {
+    await fetchJson("/api/update/apply", { method: "POST" });
+  } catch {
+    // The installer can close this app before the request returns — that's expected.
+    if (text) text.textContent = "Update started. If the app doesn't reopen on its own in a minute, open it again manually.";
+  }
+}
+
 async function loadModels() {
   try {
     const data = await fetchJson("/api/models");
@@ -1073,6 +1101,7 @@ function bindEvents() {
   $("openSettings").addEventListener("click", showSettings);
   $("backToChat").addEventListener("click", showChat);
   $("restartApp").addEventListener("click", restartApp);
+  $("updateNowBtn").addEventListener("click", applyUpdate);
   $("refreshHistory").addEventListener("click", loadHistory);
   $("setupSaveBtn").addEventListener("click", saveOpenRouterKey);
   $("setupKeyInput").addEventListener("keydown", (event) => {
@@ -1146,6 +1175,7 @@ async function init() {
     showSetup();
   }
   setStatus("Ready.");
+  checkForUpdate();
 }
 
 init();
